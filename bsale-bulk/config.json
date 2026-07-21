@@ -1,0 +1,16 @@
+{
+  "cdpUrl": "http://localhost:9222",
+  "bsaleUrlContains": "bsale",
+  "batchSize": 20,
+  "selectors": {
+    "searchInputPlaceholder": "Busca o escanea un producto",
+    "cantidadPlaceholder": "Cantidad",
+    "agregarButtonText": "Agregar"
+  },
+  "timing": {
+    "afterTypeMs": 1000,
+    "afterSelectMs": 300,
+    "afterAgregarMs": 500,
+    "typeDelayMs": 30
+  }
+}

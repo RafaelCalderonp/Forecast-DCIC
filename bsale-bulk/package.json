@@ -1,0 +1,14 @@
+{
+  "name": "bsale-bulk",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Carga masiva de consumos en Bsale a partir de columnas SKU/Cantidad pegadas desde Excel",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "playwright-core": "^1.47.0"
+  }
+}

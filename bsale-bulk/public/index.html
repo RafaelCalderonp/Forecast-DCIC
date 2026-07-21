@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Carga masiva de consumos - Bsale</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<header>
+  <h1>Carga masiva de consumos en Bsale</h1>
+  <p>Pega las columnas SKU y Cantidad, revisa el ticket de cada línea y envía en lotes.</p>
+</header>
+
+<div class="container">
+
+  <section class="card">
+    <h2>Conexión con Chrome / Bsale</h2>
+    <div class="status-bar">
+      <span id="statusDot" class="status-dot"></span>
+      <span id="statusText">Sin verificar</span>
+      <button class="secondary" id="btnCheckStatus" style="margin-left:auto">Verificar conexión</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>1. Pega tus columnas del Excel</h2>
+    <div class="paste-grid">
+      <div>
+        <label for="skuInput">SKU (uno por línea)</label>
+        <textarea id="skuInput" placeholder="R6547&#10;R1234&#10;..."></textarea>
+      </div>
+      <div>
+        <label for="cantidadInput">Cantidad (una por línea, en el mismo orden)</label>
+        <textarea id="cantidadInput" placeholder="2&#10;5&#10;..."></textarea>
+      </div>
+    </div>
+    <div class="actions">
+      <button class="primary" id="btnCargar">Cargar filas</button>
+      <span class="counters" id="loadCounters"></span>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>2. Lote actual</h2>
+    <div id="tableWrap">
+      <p class="empty">Aún no hay filas cargadas.</p>
+    </div>
+    <div class="actions">
+      <button class="primary" id="btnEnviar">Enviar</button>
+      <button class="secondary" id="btnValidadas">Validadas (quitar marcadas)</button>
+      <button class="danger" id="btnLimpiar">Limpiar todo</button>
+      <span class="counters" id="queueCounters"></span>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Registro</h2>
+    <div class="log" id="logPanel"></div>
+  </section>
+
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
