@@ -11,7 +11,13 @@ if config.config_file_name is not None:
 
 DB_URL = os.getenv(
     "DATABASE_URL", "postgresql+psycopg2://postgres:postgres@localhost:5432/forecast_dcic"
-).replace("postgresql+asyncpg", "postgresql+psycopg2")
+)
+if DB_URL.startswith("postgres://"):
+    DB_URL = DB_URL.replace("postgres://", "postgresql+psycopg2://", 1)
+elif "+asyncpg" in DB_URL:
+    DB_URL = DB_URL.replace("+asyncpg", "+psycopg2")
+elif DB_URL.startswith("postgresql://"):
+    DB_URL = DB_URL.replace("postgresql://", "postgresql+psycopg2://", 1)
 
 # Importar todos los modelos ORM para que autogenerate los detecte
 _backend = os.path.dirname(os.path.dirname(__file__))

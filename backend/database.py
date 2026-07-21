@@ -9,6 +9,12 @@ DATABASE_URL = os.getenv(
     "DATABASE_URL",
     "postgresql+asyncpg://postgres:postgres@localhost:5432/forecast_dcic"
 )
+# Render (y otros proveedores) entregan la URL como postgres:// o postgresql://
+# sin el driver async; la normalizamos para SQLAlchemy + asyncpg.
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+asyncpg://", 1)
+elif DATABASE_URL.startswith("postgresql://"):
+    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
 
 engine = create_async_engine(DATABASE_URL, echo=False, future=True)
 
