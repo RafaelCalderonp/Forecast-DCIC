@@ -1,0 +1,211 @@
+================================================================================
+  DCIC API - ENDPOINT /ventas
+  Instrucciones de uso (pensado para pegar en una sesion de Claude / cliente)
+================================================================================
+
+QUE HACE
+--------
+Devuelve ventas consolidadas de dos fuentes: Bsale y Wivo. Permite filtrar
+por fecha, canal, SKU, estado de orden y estado de despacho. Soporta
+paginacion.
+
+
+================================================================================
+  AUTENTICACION (REQUERIDA)
+================================================================================
+
+Todos los endpoints requieren una API Key en el header HTTP "X-API-Key".
+
+Si no envias la API Key o envias una incorrecta, recibes:
+
+  HTTP 401 - {"detail": "API Key invalida o no proporcionada."}
+
+
+COMO OBTENER TU API KEY
+------------------------
+Contacta al administrador de la API para obtener tu clave. Formato:
+
+  dcic_9fc37ef191c15f562444aafae6d85793
+
+
+COMO ENVIARLA
+-------------
+En el header de cada peticion HTTP:
+
+  X-API-Key: dcic_TU_API_KEY_AQUI
+
+
+Ejemplos:
+
+  curl:
+    curl -H "X-API-Key: dcic_TU_API_KEY_AQUI" \
+         "https://dcic-api-production.up.railway.app/ventas/"
+
+  Python (requests):
+    headers = {"X-API-Key": "dcic_TU_API_KEY_AQUI"}
+    r = requests.get(f"{BASE}/ventas/", headers=headers)
+
+  JavaScript (fetch):
+    fetch(`${BASE}/ventas/`, {
+      headers: { "X-API-Key": "dcic_TU_API_KEY_AQUI" }
+    })
+
+
+================================================================================
+  URL BASE
+================================================================================
+
+https://dcic-api-production.up.railway.app
+
+
+================================================================================
+  ENDPOINTS
+================================================================================
+
+1) LISTAR VENTAS (con filtros y paginacion)
+   GET /ventas/
+
+
+PARAMETROS DE QUERY (todos opcionales)
+---------------------------------------
+
+  Parameter           Tipo       Descripcion
+  ------------------- ---------- -------------------------------------------
+  fecha_desde         date       Fecha inicio (formato: YYYY-MM-DD)
+  fecha_hasta         date       Fecha fin (formato: YYYY-MM-DD)
+  canal_id            integer    ID del canal de venta
+  sku_id              string     SKU del producto (ej: R2960)
+  estado_orden        string     Regular | Devuelta | Cancelada | Otros
+  estado_despacho     string     Cancelado | Devuelto | En Mediación |
+                                 En Preparación | En Tránsito | Entregado |
+                                 Sin Información | Desconocido | Entrega Fallida
+  fuente              string     "bsale" | "wivo" (vacio para ambas)
+  limit               integer    Registros por pagina (1-100, default: 100)
+  offset              integer    Registros a saltarse (default: 0)
+
+
+EJEMPLOS DE USO
+---------------
+
+1) Todas las ventas (ultimas 100 por defecto):
+   curl -H "X-API-Key: dcic_TU_KEY" \
+        "https://dcic-api-production.up.railway.app/ventas/"
+
+2) Ventas de un rango de fechas:
+   curl -H "X-API-Key: dcic_TU_KEY" \
+        "https://dcic-api-production.up.railway.app/ventas/?fecha_desde=2024-01-01&fecha_hasta=2024-01-31"
+
+3) Ventas de un canal especifico:
+   curl -H "X-API-Key: dcic_TU_KEY" \
+        "https://dcic-api-production.up.railway.app/ventas/?canal_id=1"
+
+4) Ventas de un SKU:
+   curl -H "X-API-Key: dcic_TU_KEY" \
+        "https://dcic-api-production.up.railway.app/ventas/?sku_id=R2960"
+
+5) Solo ventas de Bsale:
+   curl -H "X-API-Key: dcic_TU_KEY" \
+        "https://dcic-api-production.up.railway.app/ventas/?fuente=bsale"
+
+6) Solo ventas de Wivo, estado entregado:
+   curl -H "X-API-Key: dcic_TU_KEY" \
+        "https://dcic-api-production.up.railway.app/ventas/?fuente=wivo&estado_despacho=Entregado"
+
+7) Paginacion (segunda pagina de 50 registros):
+   curl -H "X-API-Key: dcic_TU_KEY" \
+        "https://dcic-api-production.up.railway.app/ventas/?limit=50&offset=50"
+
+8) Combinar filtros:
+   curl -H "X-API-Key: dcic_TU_KEY" \
+        "https://dcic-api-production.up.railway.app/ventas/?fecha_desde=2024-06-01&fuente=wivo&estado_orden=Regular&limit=25"
+
+
+PYTHON (requests):
+  import requests
+  BASE = "https://dcic-api-production.up.railway.app"
+  HEADERS = {"X-API-Key": "dcic_TU_KEY"}
+
+  # Ventas de junio 2024
+  r = requests.get(f"{BASE}/ventas/", headers=HEADERS, params={
+      "fecha_desde": "2024-06-01",
+      "fecha_hasta": "2024-06-30"
+  })
+  ventas = r.json()
+  print(f"Total: {r.headers.get('X-Returned-Count')} registros")
+
+  # Paginacion
+  page1 = requests.get(f"{BASE}/ventas/", headers=HEADERS, params={"limit": 50, "offset": 0})
+  page2 = requests.get(f"{BASE}/ventas/", headers=HEADERS, params={"limit": 50, "offset": 50})
+
+
+JAVASCRIPT (fetch):
+  const BASE = "https://dcic-api-production.up.railway.app";
+  const HEADERS = { "X-API-Key": "dcic_TU_KEY" };
+
+  const r = await fetch(`${BASE}/ventas/?fecha_desde=2024-06-01&fecha_hasta=2024-06-30`, {
+      headers: HEADERS
+  });
+  const ventas = await r.json();
+  console.log("Registros:", r.headers.get("X-Returned-Count"));
+
+
+================================================================================
+  ESTRUCTURA DE LA RESPUESTA
+================================================================================
+
+Cada venta tiene estos campos (pueden venir en null):
+
+  campo                Tipo        Descripcion
+  ------------------- ----------- -------------------------------------------
+  id                   integer     ID interno
+  n_orden              string      Numero de orden
+  n_pedido             string      Numero de pedido / suborden
+  sku_id               string      SKU del producto
+  fecha                date        Fecha de compra (YYYY-MM-DD)
+  canal                string      Nombre del canal de venta
+  estado_orden         string      Estado de la orden
+  estado_despacho      string      Estado del despacho (solo Wivo)
+  cantidad             decimal     Unidades vendidas
+  venta_bruto          decimal     Venta bruta en CLP
+  valor_unitario_bruto decimal     Valor unitario bruto
+  costo_unitario_neto  decimal     Costo unitario neto
+  margen_clp           decimal     Margen en CLP
+  margen_pct           decimal     Margen porcentaje
+  desc_producto        string      Descripcion del producto
+  categoria_producto   string      Subcategoria del producto
+  marca_producto       string      Marca del producto
+  tipo_linea           string      Tipo de linea (ej: PRODUCTO)
+
+
+HEADERS DE RESPUESTA
+--------------------
+  X-Limit           : limite aplicado
+  X-Offset          : offset aplicado
+  X-Returned-Count  : cantidad de registros devueltos
+
+
+================================================================================
+  CODIGOS DE RESPUESTA
+================================================================================
+
+  200  OK
+  401  API Key invalida o no proporcionada
+  422  Parametros invalidos
+  500  Error interno (problema de base de datos)
+
+
+================================================================================
+  DOCUMENTACION INTERACTIVA
+================================================================================
+
+La API expone documentacion automatica (Swagger UI):
+
+  https://dcic-api-production.up.railway.app/docs
+
+Para probar con autenticacion en Swagger:
+1. Abre /docs
+2. Haz click en "Authorize"
+3. En el campo "X-API-Key" ingresa tu clave
+4. Ahora puedes probar los endpoints con la key incluida
+
+================================================================================

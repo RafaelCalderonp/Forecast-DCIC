@@ -1,0 +1,260 @@
+================================================================================
+  DCIC API - ENDPOINT /productos
+  Instrucciones de uso (pensado para pegar en una sesion de Claude / cliente)
+================================================================================
+
+QUE HACE
+--------
+Devuelve TODA la informacion de un producto del catalogo DCIC a partir de su
+SKU, o de una lista de SKUs. La respuesta incluye los datos del producto mas
+sus relaciones anidadas: marca, proveedor, puerto de salida, medidas de la caja
+del producto, medidas del producto armado y las cajas master (lista).
+
+
+================================================================================
+  AUTENTICACION (REQUERIDA)
+================================================================================
+
+Todos los endpoints (excepto /health) requieren una API Key en el header
+HTTP "X-API-Key".
+
+La API Key se configura como variable de entorno "API_KEY" en el servidor.
+
+Si no envias la API Key o envias una incorrecta, recibes:
+
+  HTTP 401 - {"detail": "API Key invalida o no proporcionada."}
+
+
+COMO OBTENER TU API KEY
+------------------------
+La API Key es un secreto compartido. Contacta al administrador de la API
+para obtener tu clave. Ejemplo de formato:
+
+  dcic_9fc37ef191c15f562444aafae6d85793
+
+
+COMO ENVIARLA
+-------------
+En el header de cada peticion HTTP:
+
+  X-API-Key: dcic_TU_API_KEY_AQUI
+
+
+Ejemplos por herramienta:
+
+  curl:
+    curl -H "X-API-Key: dcic_TU_API_KEY_AQUI" \
+         "https://dcic-api-production.up.railway.app/productos/R6545"
+
+  Python (requests):
+    headers = {"X-API-Key": "dcic_TU_API_KEY_AQUI"}
+    r = requests.get(f"{BASE}/productos/R6545", headers=headers)
+
+  JavaScript (fetch):
+    fetch(`${BASE}/productos/R6545`, {
+      headers: { "X-API-Key": "dcic_TU_API_KEY_AQUI" }
+    })
+
+
+================================================================================
+  URL BASE
+================================================================================
+
+https://dcic-api-production.up.railway.app
+
+(Para chequear que la API esta arriba: GET https://dcic-api-production.up.railway.app/health
+ -> responde {"status":"ok"})
+NOTA: El endpoint /health NO requiere autenticacion.
+
+
+================================================================================
+  ENDPOINTS
+================================================================================
+
+1) UN PRODUCTO POR SKU
+   GET /productos/{sku}
+
+   Ejemplo:
+   curl -H "X-API-Key: dcic_TU_KEY" \
+        "https://dcic-api-production.up.railway.app/productos/R6545"
+
+   - Devuelve un objeto JSON con el producto.
+   - Si el SKU no existe -> HTTP 404.
+
+
+2) VARIOS PRODUCTOS (LISTA DE SKUs)
+   GET /productos/?skus=SKU1,SKU2,SKU3
+
+   Ejemplo:
+   curl -H "X-API-Key: dcic_TU_KEY" \
+        "https://dcic-api-production.up.railway.app/productos/?skus=R6545,R6607,R6703"
+
+   - El parametro "skus" es una lista de SKUs separados por coma.
+   - Devuelve una LISTA JSON con los productos encontrados.
+   - Los SKUs que no existen simplemente no aparecen (no da error).
+   - Si no se pasa ningun SKU valido -> HTTP 422.
+
+   Headers de respuesta utiles:
+     X-Requested-Count : cuantos SKUs se pidieron
+     X-Returned-Count  : cuantos se encontraron y devolvieron
+
+
+NOTA SOBRE LOS SKU
+------------------
+El SKU es un texto, normalmente empieza con letra. Ejemplos reales: R6545, R6607.
+Respetar mayusculas/minusculas tal cual estan en el catalogo.
+
+
+================================================================================
+  ESTRUCTURA DE LA RESPUESTA (un producto)
+================================================================================
+
+Campos directos del producto (pueden venir en null si no hay dato):
+
+  sku                  (texto)   Identificador unico del producto
+  categoria_principal  (texto)
+  subcategoria         (texto)
+  tipo_producto        (texto)
+  proveedor_nombre     (texto)   Nombre del proveedor como texto libre
+  ean_nuevo            (texto)
+  ean_antiguo          (texto)
+  estado               (texto)
+  modelo               (texto)
+  desc_corta           (texto)   Descripcion corta del producto
+  garantia             (texto)
+  validacion_jordi     (texto)
+  invoice              (texto)
+  fecha_medicion       (fecha)   formato YYYY-MM-DD
+  moq                  (entero)  Cantidad minima de orden de compra
+  tipo                 (texto)
+  tiempo_fabricacion   (entero)  dias
+  hecho_en             (texto)
+  incluye              (texto)
+  req_armado           (texto)
+  req_montaje          (bool)
+  producto_electrico   (bool)
+  foto                 (texto)   URL de la imagen
+  color                (texto)
+  material             (texto)
+  usa_pilas            (texto)
+  rango_edad           (texto)
+  manual_espanol       (texto)
+  estacionalidad       (texto)
+  multibulto_prop      (bool)
+  bigbulto_prop        (bool)
+  qty_multibulto       (entero)
+  mes_inicio           (entero)
+  mes_final            (entero)
+  mes_compra           (entero)
+  observacion          (texto)
+  comentario_mv        (texto)
+
+Objetos anidados (vienen en null si el producto no tiene esa relacion):
+
+  marca:
+    { id, nombre }
+
+  proveedor:
+    { id, nombre, condiciones_pago }
+
+  puerto_salida:
+    { id, nombre }
+
+  caja_producto:          (medidas y tarifas de la caja del producto)
+    { id, alto_hight_cm, ancho_wide_cm, largo_length_cm, volumen_m3,
+      peso_neto_net_weight, peso_bruto_gross_weight, unidades_por_bulto,
+      h_w_l_4000, peso_volumetrico_volumetric_weight, max_l,
+      t_falabella, t_falabella_cl, t_paris, t_mercadolibre, t_ripley, t_walmart }
+
+  producto_armado:        (medidas del producto ya armado)
+    { id, alto, ancho, largo, volumen, peso_neto, peso_bruto }
+
+  cajas_master:           (LISTA - un producto puede tener varias)
+    [ { id, alto, ancho, largo, volumen, peso_neto, peso_bruto, unidades_por_caja }, ... ]
+
+
+================================================================================
+  EJEMPLO DE RESPUESTA (recortado)
+================================================================================
+
+GET /productos/R6545
+Header: X-API-Key: dcic_TU_KEY
+
+{
+  "sku": "R6545",
+  "categoria_principal": "...",
+  "desc_corta": "...",
+  "foto": "https://...",
+  "marca": { "id": 8, "nombre": "Vincenzi" },
+  "proveedor": { "id": 1, "nombre": "Starry", "condiciones_pago": "Condicion general" },
+  "puerto_salida": { "id": 4, "nombre": "SHENZHEN" },
+  "caja_producto": { "id": 123, "alto_hight_cm": "30.000", "t_falabella": "...", ... },
+  "producto_armado": { "id": 45, "alto": "28.000", "ancho": "...", ... },
+  "cajas_master": [
+    { "id": 10, "unidades_por_caja": 6, "peso_bruto": "12.500", ... },
+    { "id": 11, "unidades_por_caja": 12, ... },
+    { "id": 12, "unidades_por_caja": 24, ... }
+  ]
+}
+
+
+================================================================================
+  EJEMPLOS DE USO COMPLETOS
+================================================================================
+
+curl:
+  curl -H "X-API-Key: dcic_TU_KEY" \
+       "https://dcic-api-production.up.railway.app/productos/R6545"
+
+  curl -H "X-API-Key: dcic_TU_KEY" \
+       "https://dcic-api-production.up.railway.app/productos/?skus=R6545,R6607"
+
+Python (requests):
+  import requests
+  BASE = "https://dcic-api-production.up.railway.app"
+  HEADERS = {"X-API-Key": "dcic_TU_KEY"}
+
+  # Un producto
+  r = requests.get(f"{BASE}/productos/R6545", headers=HEADERS)
+  producto = r.json()
+
+  # Varios productos
+  r = requests.get(f"{BASE}/productos", params={"skus": "R6545,R6607,R6703"}, headers=HEADERS)
+  productos = r.json()
+  print("Encontrados:", r.headers.get("X-Returned-Count"))
+
+JavaScript (fetch):
+  const BASE = "https://dcic-api-production.up.railway.app";
+  const HEADERS = { "X-API-Key": "dcic_TU_KEY" };
+
+  const producto = await (await fetch(`${BASE}/productos/R6545`, { headers: HEADERS })).json();
+  const lista = await (await fetch(`${BASE}/productos/?skus=R6545,R6607`, { headers: HEADERS })).json();
+
+
+================================================================================
+  CODIGOS DE RESPUESTA
+================================================================================
+
+  200  OK
+  401  API Key invalida o no proporcionada
+  404  El SKU pedido no existe (solo en GET /productos/{sku})
+  422  Parametros invalidos (ej: lista de skus vacia)
+  500  Error interno (problema de base de datos)
+
+
+================================================================================
+  DOCUMENTACION INTERACTIVA
+================================================================================
+
+La API expone documentacion automatica (Swagger UI) donde se pueden probar los
+endpointss desde el navegador:
+
+  https://dcic-api-production.up.railway.app/docs
+
+Para probar con autenticacion en Swagger:
+1. Abre /docs
+2. Haz click en "Authorize"
+3. En el campo "X-API-Key" ingresa tu clave
+4. Ahora puedes probar los endpoints con la key incluida
+
+================================================================================
