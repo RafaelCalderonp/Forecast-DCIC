@@ -1,5 +1,8 @@
 // src/services/api.js
-const BASE = "/api"
+// En local (npm run dev) usa el proxy de Vite a /api.
+// En Cloudflare Pages, configura VITE_API_URL con la URL del backend en Render
+// (ej: https://forecast-dcic-backend.onrender.com/api).
+const BASE = import.meta.env.VITE_API_URL || "/api"
 
 function getToken() {
   return localStorage.getItem('dcic_token') || ''
