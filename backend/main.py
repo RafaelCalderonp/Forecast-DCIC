@@ -151,6 +151,23 @@ async def generic_error_handler(request: Request, exc: Exception):
     )
 
 
+@app.get("/health", tags=["Health"])
+async def health():
+    from sqlalchemy import text
+    from database import AsyncSessionLocal
+    try:
+        async with AsyncSessionLocal() as db:
+            await db.execute(text("SELECT 1"))
+        db_ok = True
+    except Exception as exc:
+        log.error(f"Health check DB error: {exc}")
+        db_ok = False
+    return JSONResponse(
+        status_code=200 if db_ok else 503,
+        content={"status": "ok" if db_ok else "degraded", "database": db_ok},
+    )
+
+
 # ── Routers ───────────────────────────────────────────────────────────────────
 
 app.include_router(temporadas.router,      prefix="/api/temporadas",      tags=["Temporadas"])
