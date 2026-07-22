@@ -1,4 +1,5 @@
-import { useState, Component } from "react"
+import { useState, useEffect, Component } from "react"
+import { BrowserRouter, Routes, Route, useLocation, useNavigate } from "react-router-dom"
 
 class ErrorBoundary extends Component {
   constructor(props) { super(props); this.state = { error: null } }
@@ -42,16 +43,28 @@ const NAV = [
   { id: "packs",        icon: "📋", label: "Packs",          activo: false },
 ]
 
+const IDS_VALIDOS = NAV.map(n => n.id)
+
 function AppShell() {
   const { user, logout, isAdmin } = useAuth()
-  const [seccion, setSeccion] = useState("compras")
+  const location = useLocation()
+  const navigate = useNavigate()
+  const path = location.pathname.slice(1)
+  const seccion = IDS_VALIDOS.includes(path) ? path : "compras"
   const [sidebarOpen, setSidebarOpen] = useState(true)
   // Secciones visitadas: se montan la primera vez y permanecen en DOM (preserva filtros/estado)
   const [visitadas, setVisitadas] = useState({ compras: true })
-  const irA = (id) => {
-    setVisitadas(v => ({ ...v, [id]: true }))
-    setSeccion(id)
-  }
+
+  useEffect(() => {
+    setVisitadas(v => (v[seccion] ? v : { ...v, [seccion]: true }))
+  }, [seccion])
+
+  // Normaliza URLs inválidas o la raíz "/" a la sección por defecto
+  useEffect(() => {
+    if (path !== seccion) navigate("/" + seccion, { replace: true })
+  }, [path, seccion, navigate])
+
+  const irA = (id) => navigate("/" + id)
 
   if (!user) return <LoginPage />
 
@@ -137,7 +150,11 @@ function AppShell() {
 export default function App() {
   return (
     <AuthProvider>
-      <AppShell />
+      <BrowserRouter>
+        <Routes>
+          <Route path="/*" element={<AppShell />} />
+        </Routes>
+      </BrowserRouter>
     </AuthProvider>
   )
 }
