@@ -1,4 +1,4 @@
-import { useState, useEffect, Component } from "react"
+import { useState, useEffect, Component, lazy, Suspense } from "react"
 import { BrowserRouter, Routes, Route, useLocation, useNavigate } from "react-router-dom"
 
 class ErrorBoundary extends Component {
@@ -18,17 +18,27 @@ class ErrorBoundary extends Component {
   }
 }
 import { AuthProvider, useAuth } from "./context/AuthContext"
-import LoginPage      from "./components/auth/LoginPage"
-import ProductosPage  from "./components/productos/ProductosPage"
-import ForecastPage   from "./components/forecast/ForecastPage"
-import AlertasPage    from "./components/alertas/AlertasPage"
-import ReporteCompras from "./components/compras/ReporteCompras"
-import VentasPage      from "./components/ventas/VentasPage"
-import Forecast2027Page from "./components/forecast/Forecast2027Page"
-import StockPage from "./components/stock/StockPage"
-import ListaPreciosPage from "./components/precios/ListaPreciosPage"
-import ForecastDinamicoPage from "./components/forecast/ForecastDinamicoPage"
+import LoginPage from "./components/auth/LoginPage"
 import "./App.css"
+
+// Cada sección se descarga solo la primera vez que el usuario la abre
+const ProductosPage        = lazy(() => import("./components/productos/ProductosPage"))
+const ForecastPage         = lazy(() => import("./components/forecast/ForecastPage"))
+const AlertasPage          = lazy(() => import("./components/alertas/AlertasPage"))
+const ReporteCompras       = lazy(() => import("./components/compras/ReporteCompras"))
+const VentasPage           = lazy(() => import("./components/ventas/VentasPage"))
+const Forecast2027Page     = lazy(() => import("./components/forecast/Forecast2027Page"))
+const StockPage            = lazy(() => import("./components/stock/StockPage"))
+const ListaPreciosPage     = lazy(() => import("./components/precios/ListaPreciosPage"))
+const ForecastDinamicoPage = lazy(() => import("./components/forecast/ForecastDinamicoPage"))
+
+function PageLoading() {
+  return (
+    <div style={{ padding: 40, textAlign: 'center', color: '#8ca0c0', fontFamily: 'sans-serif' }}>
+      Cargando…
+    </div>
+  )
+}
 
 const NAV = [
   { id: "compras",      icon: "🛒", label: "Compras",        activo: true  },
@@ -132,15 +142,15 @@ function AppShell() {
 
         {/* Área de páginas — scroll aquí */}
         <div className="pages-area">
-          {visitadas.compras     && <div style={{ display: seccion === "compras"     ? "" : "none" }}><ReporteCompras /></div>}
-          {visitadas.forecast    && <div style={{ display: seccion === "forecast"    ? "" : "none" }}><ForecastPage /></div>}
-          {visitadas.forecast_hw && <div style={{ display: seccion === "forecast_hw" ? "" : "none" }}><ForecastDinamicoPage /></div>}
-          {visitadas.forecast27  && <div style={{ display: seccion === "forecast27"  ? "" : "none" }}><ErrorBoundary><Forecast2027Page /></ErrorBoundary></div>}
-          {visitadas.alertas    && <div style={{ display: seccion === "alertas"    ? "" : "none" }}><AlertasPage /></div>}
-          {visitadas.productos  && <div style={{ display: seccion === "productos"  ? "" : "none" }}><ProductosPage /></div>}
-          {visitadas.ventas     && <div style={{ display: seccion === "ventas"     ? "" : "none" }}><VentasPage /></div>}
-          {visitadas.stock      && <div style={{ display: seccion === "stock"      ? "" : "none" }}><StockPage /></div>}
-          {visitadas.precios    && <div style={{ display: seccion === "precios"    ? "" : "none" }}><ListaPreciosPage /></div>}
+          {visitadas.compras     && <div style={{ display: seccion === "compras"     ? "" : "none" }}><Suspense fallback={<PageLoading />}><ReporteCompras /></Suspense></div>}
+          {visitadas.forecast    && <div style={{ display: seccion === "forecast"    ? "" : "none" }}><Suspense fallback={<PageLoading />}><ForecastPage /></Suspense></div>}
+          {visitadas.forecast_hw && <div style={{ display: seccion === "forecast_hw" ? "" : "none" }}><Suspense fallback={<PageLoading />}><ForecastDinamicoPage /></Suspense></div>}
+          {visitadas.forecast27  && <div style={{ display: seccion === "forecast27"  ? "" : "none" }}><ErrorBoundary><Suspense fallback={<PageLoading />}><Forecast2027Page /></Suspense></ErrorBoundary></div>}
+          {visitadas.alertas    && <div style={{ display: seccion === "alertas"    ? "" : "none" }}><Suspense fallback={<PageLoading />}><AlertasPage /></Suspense></div>}
+          {visitadas.productos  && <div style={{ display: seccion === "productos"  ? "" : "none" }}><Suspense fallback={<PageLoading />}><ProductosPage /></Suspense></div>}
+          {visitadas.ventas     && <div style={{ display: seccion === "ventas"     ? "" : "none" }}><Suspense fallback={<PageLoading />}><VentasPage /></Suspense></div>}
+          {visitadas.stock      && <div style={{ display: seccion === "stock"      ? "" : "none" }}><Suspense fallback={<PageLoading />}><StockPage /></Suspense></div>}
+          {visitadas.precios    && <div style={{ display: seccion === "precios"    ? "" : "none" }}><Suspense fallback={<PageLoading />}><ListaPreciosPage /></Suspense></div>}
         </div>
       </main>
     </div>

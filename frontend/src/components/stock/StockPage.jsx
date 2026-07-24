@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import * as XLSX from 'xlsx'
 import { useAuth } from '../../context/AuthContext'
 
 const clp = n => (n == null || n === 0) ? '—' : Math.round(n).toLocaleString('es-CL')
@@ -106,7 +105,8 @@ export default function StockPage() {
   }
 
   // Descargar archivo de muestra
-  function descargarMuestra() {
+  async function descargarMuestra() {
+    const XLSX = await import('xlsx')
     const cols = [
       'SKU', 'Stock Base', 'Full ML', 'Full Falabella',
       'Bodega Tránsito', 'ETA Tránsito',
