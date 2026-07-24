@@ -14,3 +14,4 @@ bcrypt==5.0.0
 python-jose[cryptography]==3.5.0
 numpy>=1.26,<2.3
 statsmodels>=0.14.4,<0.15
+httpx==0.28.1
