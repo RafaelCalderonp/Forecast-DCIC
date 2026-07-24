@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { useAuth } from "../../context/AuthContext"
 import MultiSelect from "../ui/MultiSelect"
-import * as XLSX from "xlsx"
 
 const API = "/api"
 const MESES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
@@ -90,7 +89,8 @@ export default function Forecast2027Page() {
     { val: 'todo', label: 'Año completo' },
   ]
 
-  function exportarPeriodo() {
+  async function exportarPeriodo() {
+    const XLSX = await import("xlsx")
     const p = excelPeriodo
     const meses_idx = p.startsWith('m') ? [parseInt(p.slice(1))]
       : p === 'q1' ? [0,1,2] : p === 'q2' ? [3,4,5]

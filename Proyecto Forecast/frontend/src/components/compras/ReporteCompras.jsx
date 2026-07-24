@@ -1,5 +1,4 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
-import * as XLSX from 'xlsx'
 import { useAuth } from '../../context/AuthContext'
 
 const API = '/api'
@@ -124,7 +123,8 @@ export default function ReporteCompras() {
     else { setOrdenCol(col); setOrdenDir('desc') }
   }
 
-  function exportarExcel() {
+  async function exportarExcel() {
+    const XLSX = await import('xlsx')
     if (!data) return
     const ws_data = [
       ['SKU','Marca','Cat. Principal','Subcategoría','Tipo de Producto','Temporada','Descripción','Pareto',

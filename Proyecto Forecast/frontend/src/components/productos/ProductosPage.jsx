@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback } from "react"
-import * as XLSX from "xlsx"
 import { getProductos, getTemporadas, crearProducto, actualizarProducto, eliminarProducto } from "../../services/api"
 import { useAuth } from "../../context/AuthContext"
 import { formatCLP, calcularNeto } from "../../utils/precios"
@@ -163,7 +162,8 @@ export default function ProductosPage() {
 
   const temporadaNombre = (id) => temporadas.find(t => t.id === id)?.nombre || "—"
 
-  function exportarProductos(lista, nombre) {
+  async function exportarProductos(lista, nombre) {
+    const XLSX = await import("xlsx")
     const rows = lista.map(p => ({
       'SKU':              p.sku,
       'Marca':            p.marca?.nombre || '',

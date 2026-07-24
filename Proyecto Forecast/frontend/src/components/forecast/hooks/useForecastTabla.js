@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react"
-import * as XLSX from "xlsx"
 import { getForecastTabla, aplicarProyeccion, getTemporadas } from "../../../services/api"
 import { MESES, ANIO, PERIODOS, MESES_Q, clp, mclp } from "../utils/forecastUtils"
 
@@ -321,7 +320,8 @@ export function useForecastTabla(anio = ANIO) {
   }
 
   // ── Exportar Excel ───────────────────────────────────────────────────────
-  function exportarPeriodo() {
+  async function exportarPeriodo() {
+    const XLSX = await import("xlsx")
     const p = excelPeriodo
     const meses_idx = p.startsWith('m') ? [parseInt(p.slice(1))]
       : p === 'q1' ? [0,1,2] : p === 'q2' ? [3,4,5]
