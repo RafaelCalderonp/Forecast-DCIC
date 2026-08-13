@@ -60,6 +60,31 @@ async def _job_monitor_t90():
             log.info(f"[Scheduler] T-90 activado: {n} alertas creadas")
 
 
+async def _job_sync_descontinuados():
+    """Job 4 — respaldo diario: sincroniza activo/por_discontinuar según stock."""
+    from database import AsyncSessionLocal
+    from services.descontinuados_service import sincronizar_descontinuados
+    async with AsyncSessionLocal() as db:
+        cambios = await sincronizar_descontinuados(db)
+        if cambios["desactivados"] or cambios["reactivados"]:
+            log.info(
+                f"[Scheduler] descontinuados: {len(cambios['desactivados'])} desactivados, "
+                f"{len(cambios['reactivados'])} marcados por_discontinuar"
+            )
+
+
+async def _job_sync_stock_api():
+    """Job 5 — sync horario de stock desde dcic-stock-loader (misma cadencia que la fuente)."""
+    from database import AsyncSessionLocal
+    from services.stock_api_service import sincronizar_stock_desde_api
+    async with AsyncSessionLocal() as db:
+        try:
+            resultado = await sincronizar_stock_desde_api(db)
+            log.info(f"[Scheduler] sync stock-loader: {resultado['actualizados']} SKUs actualizados")
+        except Exception as e:
+            log.warning(f"[Scheduler] sync stock-loader falló (no crítico): {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     scheduler = None
@@ -71,8 +96,12 @@ async def lifespan(app: FastAPI):
         scheduler.add_job(_job_alertas_quincenal, CronTrigger(day="1,15", hour=4, minute=0))
         # Job 3: T-90 — cada lunes a las 08:00
         scheduler.add_job(_job_monitor_t90, CronTrigger(day_of_week="mon", hour=8, minute=0))
+        # Job 4: sync descontinuados (respaldo) — todos los días a las 05:00
+        scheduler.add_job(_job_sync_descontinuados, CronTrigger(hour=5, minute=0))
+        # Job 5: sync stock desde dcic-stock-loader — cada hora
+        scheduler.add_job(_job_sync_stock_api, CronTrigger(minute=15))
         scheduler.start()
-        log.info("Scheduler APScheduler iniciado (3 jobs)")
+        log.info("Scheduler APScheduler iniciado (5 jobs)")
     log.info("Forecast DCIC API iniciada")
     yield
     if scheduler:

@@ -449,6 +449,34 @@ async def actualizar_orden_compra(
 
 # ── Generación de alertas ─────────────────────────────────────────────────────
 
+@router.get("/alertas-precio")
+async def alertas_precio(db: AsyncSession = Depends(get_db)):
+    """
+    SKUs con alza/baja de precio relevante detectada (panel expertos ago-2026).
+    Usado para marcar SKUs que requieren revisión manual antes de aprobar su OC.
+    """
+    from constants import PRECIO_ALZA_UMBRAL_REVISION, PRECIO_ALZA_UMBRAL_CONGELAR
+    result = await db.execute(text("""
+        SELECT a.sku, p.descripcion, a.precio_anterior, a.precio_nuevo,
+               a.delta_pct, a.factor_ajuste, a.fecha_deteccion
+        FROM ajuste_precio_2026 a
+        LEFT JOIN productos p ON p.sku = a.sku
+        WHERE a.activo = TRUE AND a.delta_pct > :umbral
+        ORDER BY a.delta_pct DESC
+    """), {"umbral": PRECIO_ALZA_UMBRAL_REVISION})
+    rows = result.mappings().all()
+    return [{
+        "sku": r["sku"],
+        "descripcion": r["descripcion"],
+        "precio_anterior": float(r["precio_anterior"]),
+        "precio_nuevo": float(r["precio_nuevo"]),
+        "delta_pct": float(r["delta_pct"]),
+        "factor_ajuste": float(r["factor_ajuste"]),
+        "nivel": "CONGELAR" if float(r["delta_pct"]) > PRECIO_ALZA_UMBRAL_CONGELAR else "REVISION",
+        "fecha_deteccion": r["fecha_deteccion"].isoformat(),
+    } for r in rows]
+
+
 @router.post("/alertas/generar")
 async def generar_alertas(db: AsyncSession = Depends(get_db)):
     """Ejecuta todos los detectores de alertas y devuelve cuántas se crearon."""
@@ -533,14 +561,39 @@ async def generar_ordenes_compra(
     # Limpiar OCs pendientes anteriores antes de insertar
     await db.execute(text("DELETE FROM ordenes_compra_sugeridas WHERE estado = 'pendiente'"))
 
+    # Circuit-breaker por alza de precio (panel expertos ago-2026, recomendación Larraín):
+    # SKUs con alza > umbral requieren revisión manual antes de aprobar la OC.
+    from constants import PRECIO_ALZA_UMBRAL_REVISION, PRECIO_ALZA_UMBRAL_CONGELAR
+    q_precio = text("""
+        SELECT sku, delta_pct FROM ajuste_precio_2026
+        WHERE activo = TRUE AND delta_pct > :umbral
+    """)
+    res_precio = await db.execute(q_precio, {"umbral": PRECIO_ALZA_UMBRAL_REVISION})
+    alzas_por_sku = {r[0]: float(r[1]) for r in res_precio.fetchall()}
+
     from datetime import date as date_type
     _d = lambda s: date_type.fromisoformat(str(s)[:10]) if isinstance(s, str) else (s if isinstance(s, date_type) else date_type.fromisoformat(str(s)[:10]))
 
+    n_revision = 0
     for _, row in df_ocs.iterrows():
         def _safe_int(v, default=0): return int(v) if pd.notna(v) else default
         def _safe_float(v, default=0.0): return float(v) if pd.notna(v) else default
+
+        sku = row["sku"]
+        delta_pct = alzas_por_sku.get(sku)
+        estado = "pendiente"
+        notas = None
+        if delta_pct is not None:
+            n_revision += 1
+            if delta_pct > PRECIO_ALZA_UMBRAL_CONGELAR:
+                estado = "revision_requerida"
+                notas = f"⚠ Alza de precio +{delta_pct:.1f}% — congelar compra hasta validar demanda real post-alza."
+            else:
+                estado = "revision_requerida"
+                notas = f"⚠ Alza de precio +{delta_pct:.1f}% — revisar antes de aprobar (umbral {PRECIO_ALZA_UMBRAL_REVISION}%)."
+
         oc = OrdenCompraSugerida(
-            sku=row["sku"],
+            sku=sku,
             fecha_sugerida=_d(row["fecha_sugerida"]),
             fecha_necesidad=_d(row["fecha_necesidad"]),
             cantidad_sugerida=_safe_int(row["cantidad_sugerida"]),
@@ -548,13 +601,14 @@ async def generar_ordenes_compra(
             forecast_demanda=_safe_float(row["forecast_demanda"]),
             lead_time_dias=_safe_int(row["lead_time_dias"], 30),
             stock_seguridad=_safe_int(row["stock_seguridad"]),
-            estado="pendiente",
+            estado=estado,
+            notas=notas,
             clase_abc=row.get("clase_abc") if pd.notna(row.get("clase_abc")) else None,
         )
         db.add(oc)
 
     await db.commit()
-    return {"ok": True, "ordenes_generadas": len(df_ocs)}
+    return {"ok": True, "ordenes_generadas": len(df_ocs), "requieren_revision_por_precio": n_revision}
 
 
 # ── Overrides manuales ────────────────────────────────────────────────────────

@@ -67,7 +67,13 @@ def get_logger(name: str) -> logging.Logger:
 
     logger.setLevel(logging.DEBUG)
 
-    handler = logging.StreamHandler(sys.stdout)
+    stream = sys.stdout
+    if hasattr(stream, "reconfigure"):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+    handler = logging.StreamHandler(stream)
     json_mode = os.getenv("LOG_FORMAT", "dev").lower() == "json"
     handler.setFormatter(_JsonFormatter() if json_mode else _DevFormatter())
     logger.addHandler(handler)

@@ -10,6 +10,8 @@ import io, openpyxl
 from database import get_db
 from models.models import Stock
 from schemas.schemas import StockCreate, StockUpdate, StockOut
+from services.descontinuados_service import sincronizar_descontinuados
+from services.stock_api_service import sincronizar_stock_desde_api
 
 router = APIRouter()
 
@@ -131,7 +133,85 @@ async def bulk_upsert_stock(items: List[StockBulkItem], db: AsyncSession = Depen
 
     await db.commit()
     upserted = sum(1 for i in items if i.sku in validos)
-    return {"upserted": upserted, "ignorados": len(items) - upserted}
+    cambios = await sincronizar_descontinuados(db)
+    return {"upserted": upserted, "ignorados": len(items) - upserted, **cambios}
+
+
+class StockBaseItem(BaseModel):
+    sku:        str
+    stock_base: int
+
+
+@router.post("/sync-base")
+async def sync_stock_base(items: List[StockBaseItem], db: AsyncSession = Depends(get_db)):
+    """
+    Actualiza SOLO stock_base (bodega Ecommerce en Bsale), sin tocar
+    stock_full_ml, stock_full_fala, bodega_transito, por_arribar ni pi.
+    Usado por sync_stock_bsale.py.
+    """
+    if not items:
+        return {"actualizados": 0}
+
+    skus = [i.sku for i in items]
+    result = await db.execute(
+        text("SELECT sku FROM productos WHERE sku = ANY(:skus)"),
+        {"skus": skus},
+    )
+    validos = {r[0] for r in result.fetchall()}
+
+    for i in [x for x in items if x.sku in validos]:
+        await db.execute(text("""
+            INSERT INTO stock (sku, stock_base, fecha_actualizacion)
+            VALUES (:sku, :base, CURRENT_DATE)
+            ON CONFLICT (sku) DO UPDATE SET
+                stock_base = EXCLUDED.stock_base,
+                fecha_actualizacion = CURRENT_DATE,
+                updated_at = NOW()
+        """), {"sku": i.sku, "base": i.stock_base})
+
+    await db.commit()
+    actualizados = sum(1 for i in items if i.sku in validos)
+    cambios = await sincronizar_descontinuados(db)
+    return {"actualizados": actualizados, "ignorados": len(items) - actualizados, **cambios}
+
+
+class StockFullItem(BaseModel):
+    sku:             str
+    stock_full_ml:   Optional[int] = None
+    stock_full_fala: Optional[int] = None
+
+
+@router.post("/sync-full")
+async def sync_stock_full(items: List[StockFullItem], db: AsyncSession = Depends(get_db)):
+    """
+    Actualiza SOLO stock_full_ml y/o stock_full_fala (reportes Full de
+    Mercado Libre / Falabella), sin tocar stock_base, transito, por_arribar ni pi.
+    """
+    if not items:
+        return {"actualizados": 0}
+
+    skus = [i.sku for i in items]
+    result = await db.execute(
+        text("SELECT sku FROM productos WHERE sku = ANY(:skus)"),
+        {"skus": skus},
+    )
+    validos = {r[0] for r in result.fetchall()}
+
+    for i in [x for x in items if x.sku in validos]:
+        await db.execute(text("""
+            INSERT INTO stock (sku, stock_full_ml, stock_full_fala, fecha_actualizacion)
+            VALUES (:sku, COALESCE(:ml, 0), COALESCE(:fala, 0), CURRENT_DATE)
+            ON CONFLICT (sku) DO UPDATE SET
+                stock_full_ml   = COALESCE(:ml,   stock.stock_full_ml),
+                stock_full_fala = COALESCE(:fala, stock.stock_full_fala),
+                fecha_actualizacion = CURRENT_DATE,
+                updated_at = NOW()
+        """), {"sku": i.sku, "ml": i.stock_full_ml, "fala": i.stock_full_fala})
+
+    await db.commit()
+    actualizados = sum(1 for i in items if i.sku in validos)
+    cambios = await sincronizar_descontinuados(db)
+    return {"actualizados": actualizados, "ignorados": len(items) - actualizados, **cambios}
 
 
 @router.post("/upload-excel")
@@ -203,3 +283,18 @@ async def upload_stock_excel(file: UploadFile = File(...), db: AsyncSession = De
         raise
     except Exception as e:
         raise HTTPException(400, f"Error al procesar Excel: {e}")
+
+
+@router.post("/sync-desde-api")
+async def sync_stock_desde_api_endpoint(db: AsyncSession = Depends(get_db)):
+    """
+    Sincroniza TODO el stock (base, Full ML, Full Falabella, tránsito y
+    proforma/compras con ETA) desde dcic-stock-loader — reemplaza los Excel
+    de Full ML/Falabella y el sync directo a Bsale.
+    """
+    try:
+        return await sincronizar_stock_desde_api(db)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(502, f"Error al sincronizar con stock-loader: {e}")

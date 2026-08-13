@@ -34,3 +34,15 @@ MACRO_SENS: float = float(os.getenv("MACRO_SENS", "0.003"))
 HW_ALPHA = float(os.getenv("HW_ALPHA", "0")) or None   # 0 = auto
 HW_BETA  = float(os.getenv("HW_BETA",  "0")) or None
 HW_GAMMA = float(os.getenv("HW_GAMMA", "0")) or None
+
+# ── Ajuste por alza de precios 2026 (panel expertos ago-2026) ────────────────
+# Elasticidad-precio "de libro" conservadora usada como piso sobre el forecast
+# ajustado, NO como estimación fina por SKU (muy poca data real para eso).
+# factor_ajuste = clamp(1 + ELASTICIDAD_PRECIO_DEFAULT * delta_pct/100, min, max)
+ELASTICIDAD_PRECIO_DEFAULT: float = float(os.getenv("ELASTICIDAD_PRECIO_DEFAULT", "-0.6"))
+FACTOR_AJUSTE_PRECIO_MIN: float = float(os.getenv("FACTOR_AJUSTE_PRECIO_MIN", "0.3"))
+FACTOR_AJUSTE_PRECIO_MAX: float = float(os.getenv("FACTOR_AJUSTE_PRECIO_MAX", "1.5"))
+
+# Umbrales de gobierno para Órdenes de Compra (circuit-breaker, recomendación Larraín)
+PRECIO_ALZA_UMBRAL_REVISION: float = float(os.getenv("PRECIO_ALZA_UMBRAL_REVISION", "15"))
+PRECIO_ALZA_UMBRAL_CONGELAR: float = float(os.getenv("PRECIO_ALZA_UMBRAL_CONGELAR", "30"))

@@ -36,16 +36,93 @@ class ForecastService:
     # ─────────────────────────────────────────────────────────────────────────
 
     async def _cargar_ventas_df(self) -> pd.DataFrame:
-        """Carga todas las ventas activas como DataFrame."""
+        """
+        Carga todas las ventas activas como DataFrame, corrigiendo meses con
+        quiebre de stock. Excluye el mes calendario en curso: por definición
+        siempre está incompleto (sync a medias), y si entra al historial
+        contamina el nivel/tendencia de Holt-Winters con una caída falsa
+        (visto en ago-2026: ventas casi 0 por sync pendiente, no por demanda).
+        """
         q = text("""
             SELECT sku, canal, fecha, cantidad, valor_unitario_bruto AS precio_neto
             FROM ventas
             WHERE activo = TRUE AND cantidad > 0
+              AND fecha < date_trunc('month', CURRENT_DATE)
             ORDER BY fecha
         """)
         result = await self.db.execute(q)
         rows = result.fetchall()
-        return pd.DataFrame(rows, columns=["sku", "canal", "fecha", "cantidad", "precio_neto"])
+        df = pd.DataFrame(rows, columns=["sku", "canal", "fecha", "cantidad", "precio_neto"])
+
+        df_correcciones = await self._cargar_correcciones_quiebre()
+        return self._aplicar_correccion_quiebres(df, df_correcciones)
+
+    async def _cargar_correcciones_quiebre(self) -> pd.DataFrame:
+        """Demanda base corregida por SKU/mes donde hubo quiebre de stock (ver quiebres_stock_2025)."""
+        q = text("SELECT sku, anio, mes, demanda_base FROM quiebres_stock_2025")
+        result = await self.db.execute(q)
+        rows = result.fetchall()
+        return pd.DataFrame(rows, columns=["sku", "anio", "mes", "demanda_base"])
+
+    async def _cargar_ajuste_precio(self) -> dict:
+        """factor_ajuste por SKU con cambio de precio relevante (ver ajuste_precio_2026)."""
+        q = text("SELECT sku, factor_ajuste FROM ajuste_precio_2026 WHERE activo = TRUE")
+        result = await self.db.execute(q)
+        return {row[0]: float(row[1]) for row in result.fetchall()}
+
+    def _aplicar_correccion_quiebres(self, df_ventas: pd.DataFrame, df_correcciones: pd.DataFrame) -> pd.DataFrame:
+        """
+        Reemplaza, mes a mes, la demanda real registrada por la demanda base
+        corregida cuando hubo quiebre de stock (no se vendió por falta de stock,
+        no por falta de demanda). No modifica la tabla ventas — solo el DataFrame
+        en memoria usado para calibrar Holt-Winters.
+
+        - Si hubo ventas parciales ese mes: escala proporcionalmente todos los
+          canales (preserva el mix de canal).
+        - Si el mes fue quiebre total (venta real = 0, sin filas): distribuye la
+          demanda base entre los canales del SKU según su participación histórica.
+        """
+        if df_correcciones.empty or df_ventas.empty:
+            return df_ventas
+
+        df = df_ventas.copy()
+        df["fecha"] = pd.to_datetime(df["fecha"])
+        df["cantidad"] = df["cantidad"].astype(float)
+        df["anio"] = df["fecha"].dt.year
+        df["mes"] = df["fecha"].dt.month
+
+        total_por_sku = df.groupby("sku")["cantidad"].sum()
+        share = (
+            df.groupby(["sku", "canal"])["cantidad"].sum() / total_por_sku
+        ).rename("share").reset_index()
+
+        filas_nuevas = []
+        for _, corr in df_correcciones.iterrows():
+            sku, anio, mes = corr["sku"], int(corr["anio"]), int(corr["mes"])
+            base = float(corr["demanda_base"])
+            mask = (df["sku"] == sku) & (df["anio"] == anio) & (df["mes"] == mes)
+            real_total = df.loc[mask, "cantidad"].sum()
+
+            if real_total > 0:
+                factor = base / real_total
+                df.loc[mask, "cantidad"] = df.loc[mask, "cantidad"] * factor
+            else:
+                sku_share = share[share["sku"] == sku]
+                if sku_share.empty:
+                    continue
+                fecha_mes = pd.Timestamp(year=anio, month=mes, day=1)
+                for _, s in sku_share.iterrows():
+                    cantidad = round(base * s["share"])
+                    if cantidad > 0:
+                        filas_nuevas.append({
+                            "sku": sku, "canal": s["canal"], "fecha": fecha_mes,
+                            "cantidad": cantidad, "precio_neto": None,
+                        })
+
+        if filas_nuevas:
+            df = pd.concat([df, pd.DataFrame(filas_nuevas)], ignore_index=True)
+
+        return df.drop(columns=["anio", "mes"])
 
     async def _cargar_lift_factors(self) -> list:
         """Carga todos los lift factors vigentes como lista de dicts."""
@@ -94,9 +171,13 @@ class ForecastService:
         df_ventas: pd.DataFrame = None,
         lift_factors: list = None,
         df_stock: pd.DataFrame = None,
+        ajuste_precio: dict = None,
     ) -> dict:
         """
-        Calcula el forecast completo (3 capas) para un SKU-Canal.
+        Calcula el forecast completo (4 capas) para un SKU-Canal:
+        1. Base Holt-Winters · 2. Lift factors por canal ·
+        3. Ajuste por alza/baja de precio (panel expertos ago-2026) ·
+        4. Restricción de stock disponible.
         Devuelve dict con periodos y valores de cada capa.
         """
         if df_ventas is None:
@@ -105,6 +186,8 @@ class ForecastService:
             lift_factors = await self._cargar_lift_factors()
         if df_stock is None:
             df_stock = await self._cargar_stock_df()
+        if ajuste_precio is None:
+            ajuste_precio = await self._cargar_ajuste_precio()
 
         try:
             serie = preparar_serie_temporal(df_ventas, sku, canal)
@@ -113,21 +196,25 @@ class ForecastService:
 
         resultado = calibrar_holt_winters(serie, horizonte_meses=horizonte_meses, sku=sku, canal=canal)
 
-        # Stock disponible para Capa 3
+        # Stock disponible para Capa 4
         stock_row = df_stock[df_stock["sku"] == sku]
         stock_disponible = int(stock_row["stock_base"].iloc[0]) if not stock_row.empty else None
+
+        factor_precio = ajuste_precio.get(sku, 1.0)
 
         filas = []
         for periodo_str, base in zip(resultado.periodos, resultado.forecast_base):
             mult, ajustado = aplicar_lift_factors(base, sku, canal, periodo_str, lift_factors)
-            final, dci = aplicar_restriccion_stock(ajustado, stock_disponible)
+            ajustado_precio = ajustado * factor_precio
+            final, dci = aplicar_restriccion_stock(ajustado_precio, stock_disponible)
             filas.append({
                 "sku": sku,
                 "canal": canal,
                 "periodo": periodo_str,
                 "forecast_base": base,
                 "lift_aplicado": mult,
-                "forecast_ajustado": ajustado,
+                "factor_ajuste_precio": factor_precio,
+                "forecast_ajustado": ajustado_precio,
                 "stock_disponible": stock_disponible,
                 "forecast_final": final,
                 "dci": dci,
@@ -202,6 +289,7 @@ class ForecastService:
         df_ventas = await self._cargar_ventas_df()
         lift_factors = await self._cargar_lift_factors()
         df_stock = await self._cargar_stock_df()
+        ajuste_precio = await self._cargar_ajuste_precio()
 
         n_ok = 0
         n_err = 0
@@ -213,6 +301,7 @@ class ForecastService:
                     df_ventas=df_ventas,
                     lift_factors=lift_factors,
                     df_stock=df_stock,
+                    ajuste_precio=ajuste_precio,
                 )
                 if resultado.get("error"):
                     n_err += 1
