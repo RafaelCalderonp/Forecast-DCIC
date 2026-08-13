@@ -43,6 +43,23 @@ export default function StockPage() {
 
   useEffect(() => { cargar() }, [cargar])
 
+  async function sincronizarYCargar() {
+    setLoading(true)
+    try {
+      const res = await authFetchRef.current(`${API}/stock/sync-desde-api`, { method: 'POST' })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.detail || `HTTP ${res.status}`)
+      }
+      const data = await res.json()
+      mostrarMensaje('success', `Stock sincronizado: ${data.actualizados} SKUs actualizados`)
+      await cargar()
+    } catch (e) {
+      mostrarMensaje('error', `Error al sincronizar stock: ${e.message}`)
+      setLoading(false)
+    }
+  }
+
   const mostrarMensaje = (tipo, texto) => {
     setMensaje({ tipo, texto })
     setTimeout(() => setMensaje(null), 4000)
@@ -178,7 +195,7 @@ export default function StockPage() {
             {uploading ? '…Importando' : '↑ Importar Excel'}
             <input type="file" accept=".xlsx,.xls" onChange={handleExcel} style={{ display: 'none' }} disabled={uploading} />
           </label>
-          <button className="btn btn-secondary btn-sm" onClick={cargar} disabled={loading}>
+          <button className="btn btn-secondary btn-sm" onClick={sincronizarYCargar} disabled={loading} title="Sincroniza con dcic-stock-loader y refresca">
             {loading ? <span className="spinner" style={{ width: 12, height: 12 }} /> : '↻'} Actualizar
           </button>
         </div>
