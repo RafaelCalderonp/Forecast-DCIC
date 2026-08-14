@@ -506,7 +506,7 @@ export default function TablaForecast({ anio = ANIO }) {
                   fontSize: 10, fontWeight: 600, padding: '4px 12px', textAlign: 'left',
                   whiteSpace: 'nowrap', color: '#64748b', fontStyle: 'italic',
                 }}>
-                  Venta Bruta
+                  Venta Neta
                 </th>
                 {[0,1,2,3,4,5,6,7,8].filter(mi => mesVisible(mi)).map(mi => (
                   <th key={`vb_${mi}`} style={{
@@ -516,7 +516,7 @@ export default function TablaForecast({ anio = ANIO }) {
                     fontSize: 10, color: '#475569', fontWeight: 600,
                     textAlign: 'center', whiteSpace: 'nowrap', minWidth: 60,
                   }}>
-                    ${mclp(ventaNetaPorMes[mi] * 1.19)}
+                    ${mclp(ventaNetaPorMes[mi])}
                   </th>
                 ))}
                 {q4vis && [9,10,11].map((mi, qi) => (
@@ -527,7 +527,7 @@ export default function TablaForecast({ anio = ANIO }) {
                       fontSize: 10, color: '#475569', fontWeight: 600,
                       textAlign: 'center', whiteSpace: 'nowrap', minWidth: 60,
                     }}>
-                      ${mclp(ventaNetaPorMes[mi] * 1.19)}
+                      ${mclp(ventaNetaPorMes[mi])}
                     </th>
                     <th style={{
                       background: '#EDE9FE', padding: '4px 4px',
@@ -535,7 +535,7 @@ export default function TablaForecast({ anio = ANIO }) {
                       fontSize: 10, color: '#7C3AED', fontWeight: 600,
                       textAlign: 'center', whiteSpace: 'nowrap', minWidth: 60,
                     }}>
-                      ${mclp(ventaNetaProyQ4[qi] * 1.19)}
+                      ${mclp(ventaNetaProyQ4[qi])}
                     </th>
                   </React.Fragment>
                 ))}
@@ -545,7 +545,7 @@ export default function TablaForecast({ anio = ANIO }) {
                   fontSize: 10, color: '#0D9488', fontWeight: 700,
                   textAlign: 'center', whiteSpace: 'nowrap', minWidth: 90,
                 }}>
-                  ${mclp(totalPxQ)}
+                  ${mclp(totalVentaNeta)}
                 </th>
               </tr>
 
