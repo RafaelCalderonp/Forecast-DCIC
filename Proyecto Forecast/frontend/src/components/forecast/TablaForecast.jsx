@@ -17,6 +17,10 @@ export default function TablaForecast({ anio = ANIO }) {
     filtros, setFiltro, limpiarFiltros,
     hayFiltros,
 
+    // Tarjetas KPI clickeables
+    filtroCard, setFiltroCard,
+    conteosCard,
+
     // Proyección Q4
     proyeccionQ4, cambiosQ4Proy, setCambiosQ4Proy,
     guardandoQ4Proy,
@@ -224,6 +228,53 @@ export default function TablaForecast({ anio = ANIO }) {
     <>
     <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 160px)' }}
       onClick={() => setFilterPopover(null)}>
+
+      {/* ── Tarjetas KPI (clic filtra la tabla) ────────────────────── */}
+      <div className="stats-row" style={{ padding: '10px 20px 0' }}>
+        <div className="stat-card" style={{ cursor: 'pointer', outline: filtroCard === null ? '2px solid #3b82f6' : 'none' }}
+          onClick={() => setFiltroCard(null)}>
+          <div className="stat-value">{conteosCard.total}</div>
+          <div className="stat-label">Total productos</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-value">{conteosCard.marcas}</div>
+          <div className="stat-label">Marcas</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-value">{conteosCard.categorias}</div>
+          <div className="stat-label">Categorías</div>
+        </div>
+        <div className="stat-card" style={{ cursor: 'pointer', outline: filtroCard === 'activos' ? '2px solid #22c55e' : 'none' }}
+          onClick={() => setFiltroCard(f => f === 'activos' ? null : 'activos')}>
+          <div className="stat-value">{conteosCard.activos}</div>
+          <div className="stat-label">Activos</div>
+        </div>
+        <div className="stat-card" style={{ borderColor: '#64748b', cursor: 'pointer', outline: filtroCard === 'inactivos' ? '2px solid #64748b' : 'none' }}
+          onClick={() => setFiltroCard(f => f === 'inactivos' ? null : 'inactivos')}>
+          <div className="stat-value" style={{ color: '#64748b' }}>{conteosCard.inactivos}</div>
+          <div className="stat-label">Inactivos</div>
+        </div>
+        <div className="stat-card" style={{ borderColor: '#f59e0b', cursor: 'pointer', outline: filtroCard === 'discontinuar' ? '2px solid #f59e0b' : 'none' }}
+          onClick={() => setFiltroCard(f => f === 'discontinuar' ? null : 'discontinuar')}>
+          <div className="stat-value" style={{ color: '#f59e0b' }}>{conteosCard.discontinuar}</div>
+          <div className="stat-label">Por discontinuar</div>
+        </div>
+        <div className="stat-card" style={{ borderColor: '#10b981', cursor: 'pointer', outline: filtroCard === 'nuevo' ? '2px solid #10b981' : 'none' }}
+          onClick={() => setFiltroCard(f => f === 'nuevo' ? null : 'nuevo')}>
+          <div className="stat-value" style={{ color: '#10b981' }}>{conteosCard.nuevo}</div>
+          <div className="stat-label">Nuevo</div>
+        </div>
+        <div className="stat-card" style={{ borderColor: '#6366f1', cursor: 'pointer', outline: filtroCard === 'ver_comportamiento' ? '2px solid #6366f1' : 'none' }}
+          onClick={() => setFiltroCard(f => f === 'ver_comportamiento' ? null : 'ver_comportamiento')}>
+          <div className="stat-value" style={{ color: '#6366f1' }}>{conteosCard.ver_comportamiento}</div>
+          <div className="stat-label">Ver comportamiento</div>
+        </div>
+        <div className="stat-card" style={{ borderColor: '#ef4444', cursor: 'pointer', outline: filtroCard === 'completar' ? '2px solid #ef4444' : 'none' }}
+          onClick={() => setFiltroCard(f => f === 'completar' ? null : 'completar')}>
+          <div className="stat-value" style={{ color: '#ef4444' }}>{conteosCard.completar}</div>
+          <div className="stat-label">Por completar</div>
+        </div>
+      </div>
 
       {/* ── Barra superior ──────────────────────────────────────── */}
       <div style={{

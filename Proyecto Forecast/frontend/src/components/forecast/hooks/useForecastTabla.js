@@ -25,6 +25,7 @@ export function useForecastTabla(anio = ANIO) {
   const [filterInput,      setFilterInput]      = useState({ gt: '', lt: '' })
   const [skuStockModal,    setSkuStockModal]    = useState(null)
   const [excelPeriodo,     setExcelPeriodo]     = useState('m9')
+  const [filtroCard,       setFiltroCard]       = useState(null) // 'activos'|'inactivos'|'discontinuar'|'nuevo'|'ver_comportamiento'|'completar'|null
 
   // cambios pendientes: { "sku|mes": número }
   const [cambios, setCambios] = useState({})
@@ -227,9 +228,28 @@ export function useForecastTabla(anio = ANIO) {
       if (filtros.tipo_producto.length && !filtros.tipo_producto.includes(f.tipo_producto)) return false
       if (filtros.sku         && !f.sku.toLowerCase().includes(filtros.sku.toLowerCase())) return false
       if (filtros.descripcion && !f.descripcion?.toLowerCase().includes(filtros.descripcion.toLowerCase())) return false
+      if (filtroCard === 'activos')      return f.activo && f.comentario !== 'Descontinuar'
+      if (filtroCard === 'inactivos')    return !f.activo
+      if (filtroCard === 'discontinuar') return f.comentario === 'Descontinuar' || f.por_discontinuar
+      if (filtroCard === 'nuevo')        return f.comentario === 'Nuevo'
+      if (filtroCard === 'ver_comportamiento') return f.comentario === 'Ver Comportamiento'
+      if (filtroCard === 'completar')    return f.marca === 'Sin Marca' || f.categoria === 'Sin Categoria'
       return true
     })
-  }, [filas, filtros, filtroCategoria, filtroTemp])
+  }, [filas, filtros, filtroCategoria, filtroTemp, filtroCard])
+
+  // ── Conteos para las tarjetas KPI (sobre el total sin filtro de tarjeta) ──
+  const conteosCard = useMemo(() => ({
+    total:               filas.length,
+    marcas:               new Set(filas.map(f => f.marca).filter(Boolean)).size,
+    categorias:            new Set(filas.map(f => f.categoria).filter(Boolean)).size,
+    activos:              filas.filter(f => f.activo && f.comentario !== 'Descontinuar').length,
+    inactivos:             filas.filter(f => !f.activo).length,
+    discontinuar:          filas.filter(f => f.comentario === 'Descontinuar' || f.por_discontinuar).length,
+    nuevo:                 filas.filter(f => f.comentario === 'Nuevo').length,
+    ver_comportamiento:    filas.filter(f => f.comentario === 'Ver Comportamiento').length,
+    completar:             filas.filter(f => f.marca === 'Sin Marca' || f.categoria === 'Sin Categoria').length,
+  }), [filas])
 
   const hayFiltros = filtros.marca.length > 0 || filtros.sku !== '' || filtros.descripcion !== '' ||
     filtros.subcategoria.length > 0 || filtros.tipo_producto.length > 0 ||
@@ -371,6 +391,10 @@ export function useForecastTabla(anio = ANIO) {
     filtroCategoria, setFiltroCategoria,
     filtros, setFiltro, limpiarFiltros,
     hayFiltros,
+
+    // Tarjetas KPI clickeables (mismo patrón que Productos)
+    filtroCard, setFiltroCard,
+    conteosCard,
 
     // Proyección Q4
     proyeccionQ4, cambiosQ4Proy, setCambiosQ4Proy,

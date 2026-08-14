@@ -125,6 +125,7 @@ class TablaFilaOut(BaseModel):
     ventas_2025:        List[int]
     por_discontinuar:   bool = False
     activo:             bool = True
+    comentario:         Optional[str] = None
     mes_agota_stock:    Optional[int] = None
     compras_necesarias: Optional[int] = None
 
@@ -305,6 +306,7 @@ async def forecast_tabla(
             ventas_2025        = v2025,
             por_discontinuar   = por_disc,
             activo             = producto.activo,
+            comentario         = producto.comentario,
             mes_agota_stock    = mes_agota,
             compras_necesarias = compras_nec,
         ))
