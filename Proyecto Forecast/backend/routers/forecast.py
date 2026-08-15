@@ -220,7 +220,14 @@ async def forecast_tabla(
         return por_mes
 
     def calcular_mes_agota(sku: str, meses: list[int]) -> Optional[int]:
-        """Simula consumo desde enero considerando stock actual + llegadas por ETA."""
+        """
+        Simula consumo desde enero considerando stock actual + llegadas por ETA.
+        Bug corregido (ago-2026): un SKU con stock_base=0 y sin demanda en enero
+        se marcaba "agotado desde el mes 1" (0<=0 es verdadero aunque no pasó
+        nada), anulando el resto del año aunque llegara stock nuevo después.
+        Ahora solo se considera agotado el mes en que hubo demanda real Y esa
+        demanda dejó el stock en 0 o negativo — no un mes sin movimiento.
+        """
         s = stock_map.get(sku)
         if not s:
             return 1
@@ -228,8 +235,9 @@ async def forecast_tabla(
         llega = llegadas_por_mes(s)
         for mes in range(1, 13):
             stock += llega.get(mes, 0)
-            stock -= meses[mes - 1]
-            if stock <= 0:
+            demanda_mes = meses[mes - 1]
+            stock -= demanda_mes
+            if demanda_mes > 0 and stock <= 0:
                 return mes
         return None
 
