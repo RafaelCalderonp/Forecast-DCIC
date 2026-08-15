@@ -7,8 +7,16 @@ Mapeo de bodegas -> columnas de `stock`:
   10  Ecommerce/Marketplaces      -> stock_base
   3   Bodegas Full MeLi           -> stock_full_ml
   4   Bodegas Full Falabella      -> stock_full_fala
-  2   Importaciones en Tránsito   -> bodega_transito
-  101 Proforma (compra con ETA)   -> por_arribar / eta_arribar
+  102 En tránsito · órdenes       -> bodega_transito / eta_transito (ya zarpó,
+                                     fecha real de naviera vía B/L)
+  101 Proforma (compra con ETA)   -> por_arribar / eta_arribar (aún no zarpa)
+  2   Importaciones en Tránsito   -> IGNORADA a propósito. Es el tránsito que
+                                     registra Bsale directamente y hoy está
+                                     casi vacía; la doc de la API advierte que
+                                     sumarla junto a la 102 cuenta la misma
+                                     carga dos veces. Lo real "por llegar" es
+                                     101 + 102 (el propio servicio ya expone
+                                     esa suma en el campo `por_llegar`).
   1   Bodegas Full (legacy)       -> ignorada, siempre 0
 """
 import os
@@ -27,6 +35,7 @@ def _parse_eta(valor):
         return date.fromisoformat(str(valor)[:10])
     except ValueError:
         return None
+
 
 log = get_logger("forecast_dcic.stock_api")
 
@@ -62,17 +71,22 @@ async def sincronizar_stock_desde_api(db: AsyncSession) -> dict:
         if sku not in validos:
             continue
         b = fila.get("bodegas", {})
+        eta_bod = fila.get("eta_por_bodega", {}) or {}
+        eta_transito = _parse_eta(eta_bod.get("102"))
+        eta_arribar = _parse_eta(eta_bod.get("101"))
+
         await db.execute(text("""
             INSERT INTO stock (
                 sku, stock_base, stock_full_ml, stock_full_fala,
-                bodega_transito, por_arribar, eta_arribar, fecha_actualizacion
+                bodega_transito, eta_transito, por_arribar, eta_arribar, fecha_actualizacion
             )
-            VALUES (:sku, :base, :ml, :fala, :transito, :arribar, :eta, CURRENT_DATE)
+            VALUES (:sku, :base, :ml, :fala, :transito, :eta_transito, :arribar, :eta_arribar, CURRENT_DATE)
             ON CONFLICT (sku) DO UPDATE SET
                 stock_base      = EXCLUDED.stock_base,
                 stock_full_ml   = EXCLUDED.stock_full_ml,
                 stock_full_fala = EXCLUDED.stock_full_fala,
                 bodega_transito = EXCLUDED.bodega_transito,
+                eta_transito    = EXCLUDED.eta_transito,
                 por_arribar     = EXCLUDED.por_arribar,
                 eta_arribar     = EXCLUDED.eta_arribar,
                 fecha_actualizacion = CURRENT_DATE,
@@ -82,9 +96,10 @@ async def sincronizar_stock_desde_api(db: AsyncSession) -> dict:
             "base": int(b.get("10", 0)),
             "ml": int(b.get("3", 0)),
             "fala": int(b.get("4", 0)),
-            "transito": int(b.get("2", 0)),
+            "transito": int(b.get("102", 0)),
+            "eta_transito": eta_transito,
             "arribar": int(b.get("101", 0)),
-            "eta": _parse_eta(fila.get("eta")),
+            "eta_arribar": eta_arribar,
         })
         actualizados += 1
 

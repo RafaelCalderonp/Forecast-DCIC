@@ -6,6 +6,10 @@ fulfillment de MercadoLibre, el de Falabella y las órdenes de compra de DCIC IQ
 
 **Base:** `https://dcic-stock-loader-production.up.railway.app`
 
+> Esta es la **referencia**: qué endpoints hay y qué significa cada campo. Si lo que
+> buscas es cómo resolver algo concreto —armar la tabla de productos, saber qué reponer,
+> entender por qué un número no cuadra— parte por la [guía de uso](GUIA.md).
+
 Quien pregunte por stock debería preguntarle a este servicio y no a Bsale directo: acá
 el dato ya viene con el criterio de negocio aplicado (qué bodega es vendible, cuál es
 tránsito, cuál ni se carga) y con el espejo del Full de MeLi al día, que en Bsale queda
@@ -47,8 +51,9 @@ El campo `actualizado` de la respuesta dice cuándo terminó la última carga co
 | **10** | Ecommerce/Marketplaces | **La bodega principal.** Lo que está físicamente en DCIC y se puede vender hoy. | API de Bsale |
 | **3** | Bodegas Full MeLi | Stock ya enviado al fulfillment de MercadoLibre. Se vende, pero no está en DCIC. | API de dcic-int-ml |
 | **4** | Bodegas Full Falabella | Lo mismo para el fulfillment de Falabella. | API de Falabella Seller |
-| **2** | Importaciones en Tránsito | Mercadería comprada que **ya zarpó** y todavía no entra a bodega. No se puede vender. | API de Bsale |
-| **101** | Proforma | Mercadería comprada que **todavía no zarpa**: órdenes de compra que el proveedor ya aceptó. Trae fecha de llegada comprometida. | dcic-iq-product-back |
+| **2** | Importaciones en Tránsito | Lo que Bsale registra como tránsito. Es de uso escaso: para saber qué viene en camino, mira la 101 y la 102. | API de Bsale |
+| **101** | Proforma | Comprado y aceptado por el proveedor, **todavía sin zarpar**. Sigue en fábrica o esperando embarque. Trae fecha de llegada. | dcic-iq-product-back |
+| **102** | En tránsito · órdenes | Comprado que **ya salió de origen** y todavía no entra a bodega. Su fecha la manda la naviera cuando hay B/L rastreado. | dcic-iq-product-back |
 | 1 | Bodegas Full | Bodega antigua. **Nadie la escribe hoy**, siempre viene en 0. Se devuelve solo porque existe en la tabla. | — |
 
 La **Bodega Segunda** (mercadería con falla) no se carga a propósito: no es stock
@@ -59,26 +64,45 @@ vendible y sumarla infla el disponible.
 | Pregunta | Suma |
 |---|---|
 | ¿Cuánto puedo vender hoy? | `10 + 3 + 4` |
-| ¿Cuánto viene en camino? | `2 + 101` |
-| ¿Cuánto tengo comprometido en total? | `10 + 3 + 4 + 2 + 101` |
+| ¿Cuánto viene en camino? | `101 + 102` — o el campo `por_llegar`, que ya lo suma |
+| ¿Cuánto tengo comprometido en total? | `10 + 3 + 4 + 101 + 102` |
 
-**Las bodegas 2 y 101 no se pisan entre sí.** Una orden está en la 101 hasta que zarpa;
-en cuanto zarpa sale de la 101 y aparece en la 2. Por eso se pueden sumar sin contar dos
-veces la misma caja.
+**`por_llegar` (101 + 102) es el mismo número que la columna "En tránsito" de Productos
+en DCIC IQ.** Están separadas porque no son lo mismo: lo que sigue en fábrica puede
+correrse meses, lo que ya navega tiene fecha rastreada y llega cuando llega el barco.
 
-### Qué cuenta como Proforma (bodega 101)
+**Ojo con la bodega 2**: es la de Bsale y hoy está casi vacía (unos cientos de unidades
+en total). Lo que de verdad viene en camino vive en la 101 y la 102, que se calculan
+desde las órdenes de compra. Sumar 2 + 102 podría contar dos veces una misma carga.
+
+### Qué cuenta como por llegar (bodegas 101 y 102)
 
 Lo decide dcic-iq-product-back, no este servicio:
 
 - La orden está en `compra_aceptada` o `en_ejecucion` — es decir, **el proveedor ya firmó
   el acuse de la Invoice**. Antes de esa firma la compra todavía se puede caer.
-- La orden **no ha zarpado**. Se considera zarpada si tiene el hito "Embarcada (BL)", o si
-  va en un embarque enviado con B/L aunque nadie haya estampado el hito.
-- Se descuentan las unidades ya recibidas.
+- La orden **no ha llegado**: sin el hito "Recibida" y sin estado `Closed`/`Cancelled`.
+- Se descuentan las unidades ya recibidas. Una llegada parcial no borra el saldo: si de
+  900 llegaron 10, las 890 que faltan siguen contando.
 
-La **fecha de llegada** es la comprometida en la orden. Una orden sin fecha puesta viaja
-con `eta: null`: las unidades igual cuentan. `eta: null` con la bodega 101 en 0 significa
-otra cosa —que no hay nada por llegar— y la diferencia se ve mirando la 101.
+Lo que decide entre la 101 y la 102 es **si ya zarpó**: cuenta como zarpada la orden con
+el hito "Embarcada (BL)", o la que va en un embarque enviado con B/L aunque nadie haya
+estampado el hito.
+
+La **fecha de llegada** sale de la **Proforma Invoice**, no de la PO. La PO lleva la
+fecha que DCIC pidió; la PI, la que el proveedor respondió, que es la que se va a
+cumplir. Muchas veces coinciden —la PI nace copiando la pedida— pero cuando el proveedor
+la corre, la buena es la de la PI: la DCMA 202 dice julio en la PO y septiembre en la PI.
+La fecha de la PO se usa solo si esa orden todavía no tiene PI cargada.
+
+**Una vez que el barco zarpó, manda la naviera**: para la bodega 102, si hay B/L
+rastreado se usa la descarga en puerto (real si ya ocurrió, predicha si no) más 48 horas,
+que es la regla de la casa para llegar a bodega. Una promesa escrita meses antes no
+compite con un contenedor que se está rastreando.
+
+Una orden sin fecha viaja con `eta: null` y sus unidades cuentan igual. Ojo: `eta: null`
+con `por_llegar` en 0 significa otra cosa —que no hay nada por llegar— y la diferencia se
+ve mirando ese campo.
 
 ---
 
@@ -120,7 +144,8 @@ Para quien quiere la respuesta ya masticada: qué hay disponible y qué viene en
 | `cost` | Costo unitario neto conocido, en pesos. `null` si no hay. |
 | `by_bodega` | El desglose crudo que produjo esos totales. |
 
-> Este endpoint **no incluye la proforma**. Para eso está el de abajo.
+> Este endpoint **no incluye lo que viene en camino** (bodegas 101 y 102). Para eso está
+> el de abajo.
 
 ---
 
@@ -136,7 +161,7 @@ no se omite: la forma de la respuesta es siempre la misma y no hay que preguntar
 |---|---|---|---|
 | `skus` | string | — | Filtra por SKUs, separados por coma. |
 | `solo_con_stock` | bool | `true` | Devuelve solo los SKUs con al menos una bodega en positivo. En `false` vienen todos, incluidos los que están en cero en todo (que son la mayoría del maestro). |
-| `incluir_lotes` | bool | `false` | Agrega el desglose de la proforma: cada llegada con su cantidad y su fecha. |
+| `incluir_lotes` | bool | `false` | Agrega el desglose de la **proforma** (bodega 101): cada llegada con su cantidad y su fecha. No cubre la 102. |
 
 **Respuesta**
 
@@ -151,14 +176,17 @@ no se omite: la forma de la respuesta es siempre la misma y no hay que preguntar
     { "id": 3,   "nombre": "Bodegas Full MeLi" },
     { "id": 4,   "nombre": "Bodegas Full Falabella" },
     { "id": 10,  "nombre": "Ecommerce/Marketplaces" },
-    { "id": 101, "nombre": "Proforma" }
+    { "id": 101, "nombre": "Proforma" },
+    { "id": 102, "nombre": "En tránsito · órdenes" }
   ],
   "solo_con_stock": true,
   "stock": {
     "R2994": {
-      "bodegas": { "1": 0, "2": 0, "3": 12, "4": 0, "10": 45, "101": 400 },
-      "total": 457,
-      "eta": "2026-10-15"
+      "bodegas": { "1": 0, "2": 0, "3": 12, "4": 0, "10": 45, "101": 400, "102": 120 },
+      "total": 577,
+      "por_llegar": 520,
+      "eta": "2026-07-02",
+      "eta_por_bodega": { "101": "2026-10-15", "102": "2026-07-02" }
     }
   }
 }
@@ -168,8 +196,10 @@ no se omite: la forma de la respuesta es siempre la misma y no hay que preguntar
 |---|---|
 | `bodegas` | Las bodegas que existen, con su nombre. Sirve para no tener los IDs escritos a mano. |
 | `stock[sku].bodegas` | Unidades por bodega. Las claves son los IDs **como string** (así vienen en JSON). |
-| `stock[sku].total` | Suma de todas las bodegas, proforma incluida. Si necesitas otro corte, súmalo tú desde `bodegas`. |
-| `stock[sku].eta` | Cuándo empieza a llegar lo de la proforma: la fecha comprometida más temprana. `null` si no hay proforma pendiente, o si la hay pero ninguna orden tiene fecha. |
+| `stock[sku].total` | Suma de **todas** las bodegas, lo por llegar incluido. Si necesitas otro corte, súmalo tú desde `bodegas`. |
+| `stock[sku].por_llegar` | `101 + 102`: lo comprado que todavía no entra a bodega. El número de la columna "En tránsito" de Productos en IQ. |
+| `stock[sku].eta` | Cuándo llega lo próximo: la fecha más temprana entre la 101 y la 102. `null` si no hay nada por llegar, o si lo hay pero ninguna orden tiene fecha. |
+| `stock[sku].eta_por_bodega` | La fecha de cada una por separado. Sin entrada = esa bodega no tiene fecha. |
 
 Con `incluir_lotes=true`, cada SKU trae además:
 
