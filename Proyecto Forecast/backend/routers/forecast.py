@@ -128,6 +128,7 @@ class TablaFilaOut(BaseModel):
     comentario:         Optional[str] = None
     mes_agota_stock:    Optional[int] = None
     compras_necesarias: Optional[int] = None
+    ajustado_stock_q4:  bool = False
 
 
 @router.get("/tabla", response_model=List[TablaFilaOut])
@@ -232,6 +233,37 @@ async def forecast_tabla(
                 return mes
         return None
 
+    def ajustar_forecast_q4(sku: str, meses: list[int]) -> bool:
+        """
+        La demanda proyectada Sep-Dic (índices 8-11) no puede superar el stock
+        total disponible para venderlo en ese horizonte: bodega + Full ML +
+        Full Falabella (ya en `base`) + en tránsito (ya zarpó) + por arribar
+        (proforma). Si la supera, se escala proporcionalmente hacia abajo
+        preservando la forma relativa entre los 4 meses. Afecta sobre todo a
+        productos estacionales, que concentran demanda en este período.
+        """
+        demanda_q4 = sum(meses[8:12])
+        if demanda_q4 <= 0:
+            return False
+        s = stock_map.get(sku)
+        if not s:
+            disponible_q4 = 0
+        else:
+            disponible_q4 = (
+                int(s["base"]) + int(s["bodega_transito"] or 0) + int(s["por_arribar"] or 0)
+            )
+        if demanda_q4 <= disponible_q4:
+            return False
+
+        factor = disponible_q4 / demanda_q4
+        restante = disponible_q4
+        for i in [8, 9, 10]:
+            ajustado = int(meses[i] * factor)
+            meses[i] = ajustado
+            restante -= ajustado
+        meses[11] = max(0, restante)  # el último mes absorbe el redondeo
+        return True
+
     def calcular_compras_necesarias(sku: str, meses: list[int]) -> int:
         """Unidades a comprar para cubrir el forecast dado stock disponible + llegadas."""
         total_fc = sum(meses)
@@ -287,6 +319,8 @@ async def forecast_tabla(
                 cn = calcular_compras_necesarias(producto.sku, meses)
                 compras_nec = cn if cn > 0 else None
 
+        ajustado_q4 = ajustar_forecast_q4(producto.sku, meses)
+
         precio_neto = float(producto.precio_venta_neto or 0) or round(float(producto.precio_venta_bruto or 0) / 1.19, 2)
 
         v2025 = [v2025_map.get((producto.sku, m), 0) for m in range(1, 13)]
@@ -309,6 +343,7 @@ async def forecast_tabla(
             comentario         = producto.comentario,
             mes_agota_stock    = mes_agota,
             compras_necesarias = compras_nec,
+            ajustado_stock_q4  = ajustado_q4,
         ))
 
     resultado.sort(key=lambda r: (r.marca or '', r.descripcion or ''))
