@@ -28,7 +28,13 @@ Uso:
 import asyncio, asyncpg, argparse, os
 from constants import PHI_CAP, MACRO_SENS
 
-DB = dict(host='localhost', port=5432, user='postgres', password=os.getenv("PGPASSWORD", "postgres"), database='forecast_dcic')
+DB = dict(
+    host=os.getenv("PGHOST", "localhost"),
+    port=int(os.getenv("PGPORT", "5432")),
+    user=os.getenv("PGUSER", "postgres"),
+    password=os.getenv("PGPASSWORD", "postgres"),
+    database=os.getenv("PGDATABASE", "forecast_dcic"),
+)
 
 CANALES = [
     'Falabella', 'Mercado Libre', 'Walmart', 'Paris',
@@ -149,6 +155,25 @@ async def main(phi_panel: float = 0.11):
     for r in rows:
         s, c, a, m, q = r['sku'], r['canal'], r['anio'], r['mes'], r['qty']
         ventas.setdefault(s, {}).setdefault(c, {}).setdefault(a, {})[m] = q
+
+    # ── Corrección "manguera faltante" (panel expertos ago-2026) ──────────
+    # R6982/R6983 (estufas de patio) tuvieron venta real baja en may-jun 2026
+    # por falta de un accesorio específico (manguera), no por falta de
+    # demanda; la demanda se recuperó en julio una vez resuelto. Se imputa
+    # may/jun con la tasa real de julio por canal (mismo patrón que la
+    # corrección de quiebres de stock: no se toca la tabla `ventas`, solo el
+    # dict en memoria usado para calibrar este forecast).
+    SKUS_MANGUERA_2026 = {"R6982", "R6983"}
+    for sku in SKUS_MANGUERA_2026:
+        canales_sku = ventas.get(sku, {})
+        for canal, anios in canales_sku.items():
+            v2026 = anios.get(2026, {})
+            jul = v2026.get(7)
+            if jul is None:
+                continue
+            for mes in (5, 6):
+                if mes in v2026:
+                    v2026[mes] = jul
 
     # ── Categoria por SKU ─────────────────────────────────────────
     cat_rows = await conn.fetch("""
@@ -287,6 +312,15 @@ async def main(phi_panel: float = 0.11):
         return clip(kappa, KAPPA_MIN, KAPPA_MAX)
 
     # ── BASE 2026 anualizada ──────────────────────────────────────
+    # Panel de expertos (ago-2026): un peso_h1 chico (SKU nuevo con poca
+    # historia, cae en shrinkage de categoría) puede disparar BASE_2026 a
+    # varias veces h1_real. Se agrega un tope de magnitud absoluto: ningún
+    # SKU anualiza a más de MAX_FACTOR_ANUALIZACION veces su H1 real. Sin
+    # este tope, un solo SKU inestable infla base_total y, vía el factor de
+    # reescalado, comprime a TODO el catálogo (ver ajustar_forecast_q4-style
+    # correcciones ya aplicadas en el forecast 2026).
+    MAX_FACTOR_ANUALIZACION = 3.5
+
     def calcular_base_2026(sku, canal, si):
         v = ventas.get(sku, {}).get(canal, {})
         h1_real = sum(q for m, q in v.get(2026, {}).items() if m <= 6)
@@ -294,7 +328,8 @@ async def main(phi_panel: float = 0.11):
         if h1_real > 0:
             peso_h1 = sum(si.get(m, 1.0) for m in range(1, 7)) / 12
             if peso_h1 > 0.1:   # guardarail: H1 nunca puede ser <10% del año
-                return h1_real / peso_h1
+                base = h1_real / peso_h1
+                return min(base, h1_real * MAX_FACTOR_ANUALIZACION)
 
         # Fallback: usar 2025 anualizado
         v25 = sum(v.get(2025, {}).values())
@@ -305,9 +340,15 @@ async def main(phi_panel: float = 0.11):
         return 0.0
 
     # ── Generar forecast 2027 ─────────────────────────────────────
-    base_total = 0.0
+    # Panel de expertos (ago-2026): un factor de reescalado GLOBAL sobre las
+    # 700+ SKU x 15 canales es fragil ante outliers — un solo SKU inestable
+    # (poca historia, shrinkage de categoria) puede arrastrar el factor y
+    # comprimir a TODO el catalogo por igual, incluyendo SKUs sanos y en
+    # crecimiento. Se reescala por CATEGORIA en vez de global: el radio de
+    # daño de un outlier queda acotado a su propia categoria.
     cnt = {'ancla_26': 0, 'fallback_25': 0, 'sin_datos': 0}
-    filas_raw = []   # (sku, canal, mes, qty_raw)
+    base_total_cat: dict = {}          # {categoria: sum(base_2026)}
+    filas_raw_cat: dict = {}           # {categoria: [(sku, canal, mes, qty_raw)]}
 
     universo = set()
     for sku in ventas:
@@ -323,9 +364,10 @@ async def main(phi_panel: float = 0.11):
             cnt['sin_datos'] += 1
             continue
 
+        cat = sku_cat.get(sku, 'Sin categoria')
         phi             = PHI_CANAL.get(canal, 1 + phi_panel)
         base_anual_2027 = base_2026 * phi
-        base_total     += base_2026
+        base_total_cat[cat] = base_total_cat.get(cat, 0.0) + base_2026
 
         h1_26 = sum(q for m, q in ventas.get(sku, {}).get(canal, {}).get(2026, {}).items() if m <= 6)
         if h1_26 > 0:
@@ -336,43 +378,57 @@ async def main(phi_panel: float = 0.11):
         for mes in range(1, 13):
             qty = (base_anual_2027 / 12) * si.get(mes, 1.0)
             if qty > 0:
-                filas_raw.append((sku, canal, mes, qty))
+                filas_raw_cat.setdefault(cat, []).append((sku, canal, mes, qty))
 
-    # Escalar usando metodo del mayor resto (Hamilton): garantiza total exacto
-    target_int = int(round(base_total * (1 + phi_panel)))
-    total_raw  = sum(q for _, _, _, q in filas_raw)
-    factor     = target_int / total_raw if total_raw > 0 else 1.0
-
-    # Calcular parte entera y restos para cada fila
-    scaled = [(sku, canal, mes, qty_raw * factor) for sku, canal, mes, qty_raw in filas_raw]
-    floors  = [(sku, canal, mes, int(s), s - int(s)) for sku, canal, mes, s in scaled if s >= 0.5]
-    allocated = sum(f for _, _, _, f, _ in floors)
-    remainder = target_int - allocated
-
-    # Dar +1 a las filas con mayor resto fraccionario hasta cubrir target_int
-    floors_sorted = sorted(range(len(floors)), key=lambda i: -floors[i][4])
+    # Escalar por categoria usando metodo del mayor resto (Hamilton):
+    # garantiza total exacto dentro de cada categoria, sin que una categoria
+    # contamine a otra.
     qty_map: dict = {}
-    for i, (sku, canal, mes, floor_qty, _) in enumerate(floors):
-        qty_map[(sku, canal, mes)] = floor_qty + (1 if i in set(floors_sorted[:remainder]) else 0)
+    target_total_global = 0
+    for cat, filas_raw in filas_raw_cat.items():
+        base_total = base_total_cat.get(cat, 0.0)
+        target_int = int(round(base_total * (1 + phi_panel)))
+        total_raw  = sum(q for _, _, _, q in filas_raw)
+        factor     = target_int / total_raw if total_raw > 0 else 1.0
 
-    print(f"\nAsignando {target_int:,} uds en {len(qty_map):,} filas (crecimiento objetivo: {phi_panel:.1%})")
+        scaled = [(sku, canal, mes, qty_raw * factor) for sku, canal, mes, qty_raw in filas_raw]
+        floors  = [(sku, canal, mes, int(s), s - int(s)) for sku, canal, mes, s in scaled if s >= 0.5]
+        allocated = sum(f for _, _, _, f, _ in floors)
+        remainder = target_int - allocated
 
-    for (sku, canal, mes, _) in filas_raw:
-        qty = qty_map.get((sku, canal, mes), 0)
-        if qty < 1:
-            continue
-        await conn.execute("""
+        floors_sorted = sorted(range(len(floors)), key=lambda i: -floors[i][4])
+        top_remainder = set(floors_sorted[:remainder])
+        for i, (sku, canal, mes, floor_qty, _) in enumerate(floors):
+            qty_map[(sku, canal, mes)] = floor_qty + (1 if i in top_remainder else 0)
+
+        target_total_global += target_int
+
+    filas_raw = [row for filas in filas_raw_cat.values() for row in filas]
+    print(f"\nAsignando {target_total_global:,} uds en {len(qty_map):,} filas "
+          f"({len(filas_raw_cat)} categorias reescaladas por separado, crecimiento objetivo: {phi_panel:.1%})")
+
+    registros = [
+        (sku, canal, mes, qty_map.get((sku, canal, mes), 0))
+        for (sku, canal, mes, _) in filas_raw
+        if qty_map.get((sku, canal, mes), 0) >= 1
+    ]
+    BATCH = 500
+    for i in range(0, len(registros), BATCH):
+        lote = registros[i:i + BATCH]
+        await conn.executemany("""
             INSERT INTO forecast_2027 (sku, canal, mes, cantidad, ajuste_manual)
             VALUES ($1, $2, $3, $4, FALSE)
             ON CONFLICT (sku, canal, mes) DO UPDATE
               SET cantidad = EXCLUDED.cantidad, updated_at = NOW()
               WHERE forecast_2027.ajuste_manual = FALSE
-        """, sku, canal, mes, qty)
+        """, lote)
+    print(f"Insertadas/actualizadas {len(registros):,} filas en {(len(registros)+BATCH-1)//BATCH} lotes")
 
     total      = await conn.fetchval("SELECT COUNT(*) FROM forecast_2027")
     uds_auto   = await conn.fetchval("SELECT SUM(cantidad)::bigint FROM forecast_2027 WHERE ajuste_manual=FALSE")
     uds_manual = await conn.fetchval("SELECT SUM(cantidad)::bigint FROM forecast_2027 WHERE ajuste_manual=TRUE")
 
+    base_total = sum(base_total_cat.values())
     print(f"\nSKU-canal anclados en 2026 real:  {cnt['ancla_26']:>6,}")
     print(f"SKU-canal con fallback 2025:       {cnt['fallback_25']:>6,}")
     print(f"\nBase 2026 estimada (total):        {base_total:>12,.0f} uds")
