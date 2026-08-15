@@ -233,7 +233,7 @@ async def forecast_tabla(
                 return mes
         return None
 
-    def ajustar_forecast_q4(sku: str, meses: list[int]) -> bool:
+    def ajustar_forecast_q4(sku: str, meses: list[int], temporada_nombre: Optional[str]) -> bool:
         """
         La demanda proyectada Sep-Dic (índices 8-11) no puede superar el stock
         total disponible para venderlo en ese horizonte: bodega + Full ML +
@@ -241,7 +241,16 @@ async def forecast_tabla(
         (proforma). Si la supera, se escala proporcionalmente hacia abajo
         preservando la forma relativa entre los 4 meses. Afecta sobre todo a
         productos estacionales, que concentran demanda en este período.
+
+        Excepción (indicación de negocio ago-2026): los productos "No
+        Estacional" pueden reponerse en cualquier momento del año, así que
+        no se topan al stock actual — se deja ver la demanda real proyectada
+        y la faltante queda visible vía `compras_necesarias` (alerta de
+        compra), en vez de esconderla recortando el forecast.
         """
+        if (temporada_nombre or '').strip().lower() == 'no estacional':
+            return False
+
         demanda_q4 = sum(meses[8:12])
         if demanda_q4 <= 0:
             return False
@@ -319,7 +328,7 @@ async def forecast_tabla(
                 cn = calcular_compras_necesarias(producto.sku, meses)
                 compras_nec = cn if cn > 0 else None
 
-        ajustado_q4 = ajustar_forecast_q4(producto.sku, meses)
+        ajustado_q4 = ajustar_forecast_q4(producto.sku, meses, temporada.nombre if temporada else None)
 
         precio_neto = float(producto.precio_venta_neto or 0) or round(float(producto.precio_venta_bruto or 0) / 1.19, 2)
 
